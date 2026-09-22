@@ -2,5 +2,7 @@
   "name": "Aether",
   "description": "Private messaging & calling app with real-time presence, voice changer, beauty filters, and a privacy quick-switch calculator.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
