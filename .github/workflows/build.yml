@@ -1,33 +1,45 @@
-name: Build Android APK
+name: Build & Release Android APK
 
 on:
   push:
     branches: [ "**" ]
+    tags:
+      - "v*"
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Custom Release Tag (e.g. v1.0.1)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
 
 jobs:
   build:
-    name: Build & Export APK
+    name: Build & Release Fresh APK
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: "temurin"
+          java-version: "17"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
       - name: Prepare Keystore & Environment
         run: |
-          # Ensure .env file exists for secrets plugin
+          # Ensure .env file exists for secrets gradle plugin
           if [ ! -f ".env" ]; then
             if [ -f ".env.example" ]; then
               cp .env.example .env
@@ -36,7 +48,7 @@ jobs:
             fi
           fi
 
-          # Decode debug.keystore from base64 if not already present
+          # Decode debug.keystore from base64 if not present
           if [ ! -f "debug.keystore" ] && [ -f "debug.keystore.base64" ]; then
             base64 -d debug.keystore.base64 > debug.keystore
           fi
@@ -47,9 +59,54 @@ jobs:
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
+      - name: Prepare Release APK Asset
+        run: |
+          mkdir -p release-output
+          cp app/build/outputs/apk/debug/app-debug.apk release-output/Aether-App.apk
+          cp app/build/outputs/apk/debug/app-debug.apk release-output/Aether-v1.0-build${{ github.run_number }}.apk
+
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Aether-Debug-APK
-          path: app/build/outputs/apk/debug/*.apk
+          name: Aether-Fresh-APK
+          path: release-output/*.apk
           if-no-files-found: error
+
+      - name: Determine Release Tag
+        id: tag_info
+        if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.release_tag }}" ]; then
+            TAG="${{ github.event.inputs.release_tag }}"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="v1.0.${{ github.run_number }}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Publish GitHub Release with Fresh APK
+        uses: softprops/action-gh-release@v2
+        if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
+        with:
+          tag_name: ${{ steps.tag_info.outputs.tag }}
+          name: "Aether APK Release ${{ steps.tag_info.outputs.tag }}"
+          body: |
+            ### 🚀 Fresh Aether APK Release (${{ steps.tag_info.outputs.tag }})
+
+            A fresh production-quality Android APK build is ready for installation.
+
+            - **Build**: `${{ github.run_number }}`
+            - **Commit**: `${{ github.sha }}`
+            - **Branch**: `${{ github.ref_name }}`
+
+            ---
+            ### 📥 Direct Download:
+            Download **`Aether-App.apk`** from the Assets list below and install directly on your Android phone.
+          draft: false
+          prerelease: false
+          files: |
+            release-output/Aether-App.apk
+            release-output/Aether-v1.0-build${{ github.run_number }}.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
